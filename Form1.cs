@@ -1,8 +1,8 @@
 using System.Text;
 using System.Windows.Forms;
-using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using System.Linq;
 using WinFormsApp1.Interfaces;
 using Color = DocumentFormat.OpenXml.Wordprocessing.Color;
 
@@ -43,40 +43,75 @@ public partial class Form1 : Form
         }
 
         FinalFileTextBox.Text = sfd.FileName;
-
     }
 
     private void HideButton_Click(object sender, EventArgs e)
     {
-        if (_steganography.EnoughSpace(SourceFileTextBox.Text, MessageToHideTextBox.Text))
+        using var ofd = new OpenFileDialog()
         {
-            _steganography.HideMessage(SourceFileTextBox.Text, FinalFileTextBox.Text, MessageToHideTextBox.Text, password);
-            MessageBox.Show("Message was hidden successfully", "Succes", MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-        }
-        else
+            Filter = "All Files (*.*)|*.*",
+        };
+
+        if (ofd.ShowDialog() != DialogResult.OK)
         {
-            MessageBox.Show("Cover file does not have enough space to cover the message", "Error", MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            return;
         }
+
+        string filePath = ofd.FileName;
+        byte[] fileBytes = File.ReadAllBytes(filePath);
+
+        _steganography.HideFile(SourceFileTextBox.Text, FinalFileTextBox.Text, fileBytes, password);
+
+        //if (_steganography.EnoughSpace(SourceFileTextBox.Text, fileBytes))
+        //{
+        //    _steganography.HideFile(SourceFileTextBox.Text, FinalFileTextBox.Text, fileBytes, password);
+        //    MessageBox.Show("File was hidden successfully", "Success", MessageBoxButtons.OK,
+        //        MessageBoxIcon.Information);
+        //}
+        //else
+        //{
+        //    MessageBox.Show("Cover file does not have enough space to hide the file", "Error", MessageBoxButtons.OK,
+        //        MessageBoxIcon.Error);
+        //}
 
         SourceFileTextBox.Clear();
         FinalFileTextBox.Clear();
-        MessageToHideTextBox.Clear();
     }
 
     private void ExtractButton_Click(object sender, EventArgs e)
     {
         using var ofd = new OpenFileDialog() { Filter = "(*.docx)|*.docx", };
 
-        if (ofd.ShowDialog() == DialogResult.OK)
+        if (ofd.ShowDialog() != DialogResult.OK)
         {
-            string filePath = ofd.FileName;
-
-            string extractedMessage = _steganography.ExtractMessage(filePath, password);
-            ExtractedMessageLabel.Text = extractedMessage;
+            return;
         }
 
-        ExtractFileTextBox.Clear();
+        string filePath = ofd.FileName;
+
+        using var sfd = new SaveFileDialog()
+        {
+            Filter = "All Files (*.*)|*.*",
+        };
+
+        if (sfd.ShowDialog() != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            var extractedFile = _steganography.ExtractFile(filePath, password);
+            var extractedText = Encoding.UTF8.GetString(extractedFile);
+            File.WriteAllText(sfd.FileName, extractedText, Encoding.UTF8);
+
+            MessageBox.Show("File was extracted successfully", "Success", MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
     }
 }

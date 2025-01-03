@@ -7,19 +7,18 @@ using Color = DocumentFormat.OpenXml.Wordprocessing.Color;
 
 public class Steganography : ISteganography
 {
-    public void HideMessage(string sourcePath, string destinationPath, string message, int[] password)                      // Method to hide a message within a Word document
+    public void HideFile(string sourcePath, string destinationPath, byte[] fileBytes, int[] password)
     {
         File.Copy(sourcePath, destinationPath, true);
         using var wordDoc = WordprocessingDocument.Open(destinationPath, true);
-        var content = Encoding.UTF8.GetBytes(message);                                                                      // Convert the message to byte array
 
-        var currentByte = 0; 
+        var currentByte = 0;
         var body = wordDoc.MainDocumentPart!.Document.Body!;
         var newElements = new List<OpenXmlElement>();
 
-        foreach (var element in body.Elements())                                                                            // Iterate over each element in the document's body
+        foreach (var element in body.Elements())
         {
-            if (currentByte >= content.Length)
+            if (currentByte >= fileBytes.Length)
             {
                 newElements.Add(element.CloneNode(true));
                 continue;
@@ -27,12 +26,12 @@ public class Steganography : ISteganography
 
             if (element is Table table)
             {
-                var newTable = ProcessTable(table, ref currentByte, content, password);                                     // Process tables
+                var newTable = ProcessTable(table, ref currentByte, fileBytes, password);
                 newElements.Add(newTable);
             }
             else if (element is Paragraph paragraph)
             {
-                var newParagraph = ProcessParagraph(paragraph, ref currentByte, content, password);                         // Process paragraphs
+                var newParagraph = ProcessParagraph(paragraph, ref currentByte, fileBytes, password);
                 newElements.Add(newParagraph);
             }
             else
@@ -46,28 +45,28 @@ public class Steganography : ISteganography
         wordDoc.MainDocumentPart.Document.Save();
     }
 
-    private Table ProcessTable(Table table, ref int currentByte, byte[] content, int[] password)                            // Method to process tables within the Word document
+    private Table ProcessTable(Table table, ref int currentByte, byte[] fileBytes, int[] password)
     {
         var newTable = table.CloneNode(true) as Table;
 
-        foreach (var row in newTable!.Elements<TableRow>())                                                                 // Iterate over each row and cell within the table
+        foreach (var row in newTable!.Elements<TableRow>())
         {
             foreach (var cell in row.Elements<TableCell>())
             {
-                ProcessTableCell(cell, ref currentByte, content, password);                                                 // Process each cell
+                ProcessTableCell(cell, ref currentByte, fileBytes, password);
             }
         }
 
         return newTable;
     }
 
-    private void ProcessTableCell(TableCell cell, ref int currentByte, byte[] content, int[] password)                      // Method to process individual cells within the table
+    private void ProcessTableCell(TableCell cell, ref int currentByte, byte[] fileBytes, int[] password)
     {
         var newCellContent = new List<OpenXmlElement>();
 
         foreach (var cellElement in cell.Elements())
         {
-            if (currentByte >= content.Length)
+            if (currentByte >= fileBytes.Length)
             {
                 newCellContent.Add(cellElement.CloneNode(true));
                 continue;
@@ -75,7 +74,7 @@ public class Steganography : ISteganography
 
             if (cellElement is Paragraph cellParagraph)
             {
-                var newParagraph = ProcessParagraph(cellParagraph, ref currentByte, content, password);                     // Process paragraph inside cell
+                var newParagraph = ProcessParagraph(cellParagraph, ref currentByte, fileBytes, password);
                 newCellContent.Add(newParagraph);
             }
             else
@@ -88,46 +87,33 @@ public class Steganography : ISteganography
         cell.Append(newCellContent);
     }
 
-    private Paragraph ProcessParagraph(Paragraph paragraph, ref int currentByte, byte[] content, int[] password)            // Method to process paragraphs in the Word document
+    private Paragraph ProcessParagraph(Paragraph paragraph, ref int currentByte, byte[] fileBytes, int[] password)
     {
         var newParagraph = new Paragraph();
 
-        foreach (var pEl in paragraph.Elements())                                                                           // Iterate over each element within the paragraph
+        foreach (var pEl in paragraph.Elements())
         {
-            if (currentByte >= content.Length)
-            {
-                newParagraph.AppendChild(pEl.CloneNode(true));                                                              
-                continue;
-            }
-
-            if (pEl is not Run run || pEl is Drawing || run.Descendants<Drawing>().Any())                                   // Skip runs containing drawings or other unsupported elements
-            {
-                newParagraph.AppendChild(pEl.CloneNode(true)); 
-                continue;
-            }
-
-            if (run.RunProperties?.Color?.Val != null && run.RunProperties.Color.Val != "000000")                           // Skip if the text has non-black text color
-            {
-                newParagraph.AppendChild(pEl.CloneNode(true));
-                continue;
-            }
-            
-            if (pEl is Hyperlink innerHyperlink ||                                                                          // Skip hyperlinks and inner elements
-                pEl.Ancestors<Hyperlink>().Any() ||
-                run.Ancestors<Hyperlink>().Any())
+            if (currentByte >= fileBytes.Length)
             {
                 newParagraph.AppendChild(pEl.CloneNode(true));
                 continue;
             }
 
-            if (run.InnerText.Contains("HYPERLINK", StringComparison.OrdinalIgnoreCase))                                    // Ignore text containing "HYPERLINK"
+            if (pEl is Drawing drawing)
             {
-                continue; 
+                newParagraph.AppendChild(drawing.CloneNode(true));
+                continue;
             }
 
-            for (var index = 0; index < run.InnerText.Length; index++)                                                      // Process each character in the run
+            if (pEl is not Run run || pEl is Drawing || run.Descendants<Drawing>().Any())
             {
-                var b = currentByte < content.Length ? content[currentByte++] : -1;
+                newParagraph.AppendChild(pEl.CloneNode(true));
+                continue;
+            }
+
+            for (var index = 0; index < run.InnerText.Length; index++)
+            {
+                var b = currentByte < fileBytes.Length ? fileBytes[currentByte++] : -1;
                 if (b == -1)
                 {
                     newParagraph.AppendChild(new Run(new Text(run.InnerText[index..]))
@@ -151,7 +137,11 @@ public class Steganography : ISteganography
                     RunProperties = (run.RunProperties?.CloneNode(true) as RunProperties) ?? new RunProperties()
                 };
 
-                newRun.RunProperties.Color = new Color { Val = $"{colorRed:X2}{colorGreen:X2}{colorBlue:X2}" };
+                newRun.RunProperties.Color = new Color
+                {
+                    Val = $"{colorRed:X2}{colorGreen:X2}{colorBlue:X2}"
+                };
+
                 newParagraph.AppendChild(newRun);
             }
         }
@@ -159,13 +149,14 @@ public class Steganography : ISteganography
         return newParagraph;
     }
 
-    public string ExtractMessage(string filePath, int[] password)                                                           // Method to extract a hidden message from the Word document
+
+    public byte[] ExtractFile(string filePath, int[] password)
     {
         using var wordDoc = WordprocessingDocument.Open(filePath, false);
         var extractedBytes = new List<byte>();
-        var body = wordDoc.MainDocumentPart!.Document.Body!;                                                                // Get the body of the Word document
+        var body = wordDoc.MainDocumentPart!.Document.Body!;
 
-        foreach (var element in body.Elements())                                                                            // Iterate over each element in the document's body
+        foreach (var element in body.Elements())
         {
             if (element is Table table)
             {
@@ -177,7 +168,7 @@ public class Steganography : ISteganography
                         {
                             if (cellElement is Paragraph cellParagraph)
                             {
-                                ExtractFromParagraph(cellParagraph, extractedBytes, password);                              // Extract data from table cells
+                                ExtractFromParagraph(cellParagraph, extractedBytes, password);
                             }
                         }
                     }
@@ -185,44 +176,51 @@ public class Steganography : ISteganography
             }
             else if (element is Paragraph paragraph)
             {
-                ExtractFromParagraph(paragraph, extractedBytes, password);                                                  // Extract data from paragraphs
+                ExtractFromParagraph(paragraph, extractedBytes, password);
             }
         }
 
-        return Encoding.UTF8.GetString(extractedBytes.ToArray());                                                           // Convert byte array to string
+        return extractedBytes.ToArray();
     }
 
-    private void ExtractFromParagraph(Paragraph paragraph, List<byte> extractedBytes, int[] password)                       // Helper method to extract data from a paragraph
+    private void ExtractFromParagraph(Paragraph paragraph, List<byte> extractedBytes, int[] password)
     {
         foreach (var run in paragraph.Elements<Run>())
         {
-            if (run.RunProperties?.Color?.Val == null) continue;
+            if (run.RunProperties?.Color?.Val == null || run.Descendants<Drawing>().Any())
+                continue;
 
             var colorHex = run.RunProperties.Color.Val?.Value;
             if (string.IsNullOrEmpty(colorHex) || colorHex.Length != 6) continue;
 
-            var colorRed = Convert.ToInt32(colorHex.Substring(0, 2), 16);
-            var colorGreen = Convert.ToInt32(colorHex.Substring(2, 2), 16);
-            var colorBlue = Convert.ToInt32(colorHex.Substring(4, 2), 16);
+            try
+            {
+                var colorRed = Convert.ToInt32(colorHex.Substring(0, 2), 16);
+                var colorGreen = Convert.ToInt32(colorHex.Substring(2, 2), 16);
+                var colorBlue = Convert.ToInt32(colorHex.Substring(4, 2), 16);
 
-            var byteValue =
-                (colorRed << (password[1] + password[2])) |
-                (colorGreen << password[2]) |
-                colorBlue;
+                var byteValue =
+                    (colorRed << (password[1] + password[2])) |
+                    (colorGreen << password[2]) |
+                    colorBlue;
 
-            extractedBytes.Add((byte)byteValue);                                                                            // Append the extracted byte to the list
+                extractedBytes.Add((byte)byteValue);
+            }
+            catch
+            {
+                continue;
+            }
         }
     }
-
-    public bool EnoughSpace(string filePath, string message)
-    {
-        using var wordDoc = WordprocessingDocument.Open(filePath, false);
-
-        var docSpace = wordDoc.MainDocumentPart!.Document.Descendants<Text>()
-            .Sum(text => text.Text.Length);
-        int messageLength = message.Length;
-
-        return docSpace >= messageLength;
-    }
-
 }
+
+//public bool EnoughSpace(string filePath, byte[] fileBytes)
+//{
+//    using var wordDoc = WordprocessingDocument.Open(filePath, false);
+
+//    var docSpace = wordDoc.MainDocumentPart!.Document.Descendants<Text>()
+//      .Sum(text => text.Text.Length);
+//    int requiredSpace = fileBytes.Length;
+
+//    return docSpace >= requiredSpace;
+//} 

@@ -2,8 +2,8 @@
 {
     public interface ISteganography
     {
-        void HideMessage(string sourcePath, string destinationPath, string message, int[] password);
-        string ExtractMessage(string filePath, int[] password);
-        bool EnoughSpace(string filePath, string message);
+        void HideFile(string sourcePath, string destinationPath, byte[] fileBytes, int[] password);
+        byte[] ExtractFile(string filePath, int[] password);
+        // bool EnoughSpace(string filePath, byte[] fileBytes);
     }
 }
